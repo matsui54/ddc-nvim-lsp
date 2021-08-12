@@ -10,6 +10,7 @@ import {
   Denops,
   vars,
 } from "https://deno.land/x/ddc_vim@v0.0.12/deps.ts#^";
+import { once } from "https://deno.land/x/denops_std@v1.0.1/anonymous/mod.ts";
 
 const LSP_KINDS = [
   "Text",
@@ -77,10 +78,6 @@ export class Source extends BaseSource {
   ): Promise<void> {
     await batch(denops, (helper) => {
       vars.g.set(helper, "ddc#source#lsp#_results", []);
-      vars.g.set(helper, "ddc#source#lsp#_success", false);
-      vars.g.set(helper, "ddc#source#lsp#_requested", false);
-      vars.g.set(helper, "ddc#source#lsp#_prev_input", "");
-      vars.g.set(helper, "ddc#source#lsp#_complete_position", -1);
     });
   }
 
@@ -92,51 +89,48 @@ export class Source extends BaseSource {
     sourceParams: Record<string, Params>,
     completeStr: string,
   ): Promise<Candidate[]> {
-    const prevInput = await vars.g.get(denops, "ddc#source#lsp#_prev_input");
-    const requested = await vars.g.get(denops, "ddc#source#lsp#_requested");
-    if (context.input == prevInput && requested) {
-      return this.processCandidates(denops, sourceParams);
-    }
-
     const params = await denops.call(
       "luaeval",
       "vim.lsp.util.make_position_params()",
     );
 
-    await batch(denops, (helper) => {
-      vars.g.set(helper, "ddc#source#lsp#_results", []);
-      vars.g.set(helper, "ddc#source#lsp#_success", false);
-      vars.g.set(helper, "ddc#source#lsp#_requested", false);
-      vars.g.set(helper, "ddc#source#lsp#_prev_input", context.input);
-      vars.g.set(
-        helper,
-        "ddc#source#lsp#_complete_position",
-        context.input.length - completeStr.length,
-      );
-
-      helper.call(
+    return new Promise((resolve) => {
+      denops.call(
         "luaeval",
-        "require('ddc_nvim_lsp').request_candidates(" +
-          "_A.arguments)",
-        { "arguments": params },
+        "require('ddc_nvim_lsp').request_candidates(_A.params, _A.callback)",
+        {
+          "params": params,
+          "callback": once(denops, async (response) => {
+            if (response == "1") {
+              const results = await vars.g.get(
+                denops,
+                "ddc#source#lsp#_results",
+                [],
+              );
+              return resolve(
+                this.processCandidates(
+                  results,
+                  sourceParams,
+                  context.input,
+                  context.input.length - completeStr.length,
+                ),
+              );
+            }
+            return resolve([]);
+          })[0],
+        },
       );
+    }).then((cs: Candidate[]) => {
+      return cs;
     });
-
-    return [];
   }
 
   async processCandidates(
-    denops: Denops,
-    params: Record<string, unknown>,
+    results: Record<string, unknown>,
+    params: Params,
+    input: string,
+    position: number,
   ): Promise<Candidate[]> {
-    const results = await vars.g.get(
-      denops,
-      "ddc#source#lsp#_results",
-    ) as Record<
-      string,
-      unknown
-    >[];
-
     if (results.length == 0) {
       return [];
     }
@@ -147,15 +141,7 @@ export class Source extends BaseSource {
       if ("textEdit" in v && v["textEdit"]) {
         const textEdit = v["textEdit"];
         if ("range" in textEdit && textEdit.range.start == textEdit.range.end) {
-          const previousInput = vars.g.get(
-            denops,
-            "ddc#source#lsp#_prev_input",
-          );
-          const completePosition = vars.g.get(
-            denops,
-            "ddc#source#lsp#_complete_position",
-          );
-          word = `${previousInput.slice(completePosition)}${textEdit.newText}`;
+          word = `${input.slice(position)}${textEdit.newText}`;
         } else {
           word = textEdit.newText;
         }
