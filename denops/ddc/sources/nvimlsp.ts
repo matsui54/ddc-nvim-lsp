@@ -89,6 +89,9 @@ export class Source extends BaseSource {
     sourceParams: Record<string, Params>,
     completeStr: string,
   ): Promise<Candidate[]> {
+    if (!(await denops.call("luaeval", "vim.lsp.buf.server_ready()"))) {
+      return [];
+    }
     const params = await denops.call(
       "luaeval",
       "vim.lsp.util.make_position_params()",
