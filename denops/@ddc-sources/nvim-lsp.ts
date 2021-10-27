@@ -96,10 +96,12 @@ export class Source extends BaseSource<Params> {
 
       let word = label;
 
-      // Note: Does not insert snippet directly
-      if (
+      if (v.filterText) {
+        word = v.filterText;
+      } else if (
         !v.insertTextFormat || v.insertTextFormat == InsertTextFormat.PlainText
       ) {
+        // Note: Does not insert snippet directly
         if (v.textEdit) {
           const textEdit = v.textEdit;
           if (
